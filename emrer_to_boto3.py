@@ -29,19 +29,14 @@ def b3_tags(tags_in):
     Rerurns:
         list
     """
-    # TODO: pretty much everything else is a list, allowing only dict here
-    # might be confusing to the user. Maybe, if we receive a list it should
-    # be converted to dict?
-    #if isinstance(tags_in, list):
-    #    tags_in = dict(tags_in[0])
-    if not isinstance(tags_in, dict):
-        raise TypeError('Parameter should be a dictionary, but we received ', 
-                        type(tags_in))
+    if not isinstance(tags_in, list):
+        tags_in = [tags_in]
     
     tags_out = []
-    for tag_in_key in tags_in:
-        tags_out.append({'Key': tag_in_key, 'Value': tags_in[tag_in_key]})
-
+    for tag in tags_in:
+        for tag_key in tag:
+            tags_out.append({'Key': tag_key, 'Value': tag[tag_key]})
+    print(tags_out)
     return tags_out
 
 
