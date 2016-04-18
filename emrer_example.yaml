@@ -1,0 +1,194 @@
+---
+# Will be set as a tag, used later to identify the cluster to be stopped
+# Default: REQUIRED
+unique_name: 'unique_id_of_cluster_for_later_use'
+
+# Cluster name. Will be shown in EMR console and added as a tag. Doesn't have
+# to be unique.
+# Default: REQUIRED
+name: 'emrer_example_cluster'
+
+# EMR cluster version. Only >= 4.x should be used here
+# Default: latest version
+release_label: 'emr-4.3.0'
+
+# Where to send logs. If not set, logging will be disabled. This is the
+# debugging parameter set in awscli and web console.
+# Default: ''
+log_uri: 's3://logs_bucket/logs_path/'
+
+# Weather to stop the cluster or not after steps have been completed
+# Default: False
+keep_cluster_running: False
+
+# Name of the ssh key that will be added to hadoop's ~/.ssh/authorized_keys.
+# If no key is specified, it won't be possible to ssh to hadoop user. Which
+# may be fine, for example for clusters that will autodestroy
+# Default: ''
+ssh_key_name: 'bgdnlp@'
+
+
+### HARDWARE SECTION - where EC2 instances are set
+#
+# id of the subnet where the cluster will be created
+# Default: REQUIRED
+subnet_id: 'subnet-required'
+
+# security groups associated with the master instance
+# Default: REQUIRED
+master_security_groups:
+  - 'sg-required'
+
+# security groups associated with slave instances
+# Default: REQUIRED
+slave_security_groups:
+  - 'sg-required'
+
+# Number of master instances. Probably 1.
+# Default 1
+master_instance_count: 1
+
+# Number of core instances
+# Default: 0
+core_instance_count: 2
+
+# Number of task instances. Note that only one task instance groups can exist
+# at this time. It would be relatively easy to add more.
+# Default: 0
+task_instance_count: 0
+
+# For instance type, there is an 'inheritance' system. Each lower level will
+# inherit the value of the upper level, unless otherwise specified. The
+# hierarchy is:
+#   instance_type
+#   default_instance_type
+#   master_instance_type
+#   slave_instance_type
+#   core_instance_type
+#   task_instance_type
+# So, for example, setting:
+#   instance_type: m1.large
+#   task_instance_type: m1.xlarge
+# would result in all instances being m1.large, except for task ones
+# Default: 'm1.large'
+master_instance_type: 'm1.large'
+slave_instance_type: 'm1.large'
+
+# IAM roles. ec2_role is the one associated with the EC2 instances
+ec2_role: 'emr-role-ec2'
+emr_role: 'emr-role-emr'
+
+
+### APPLICATIONS to be installed on the cluster
+applications:
+  - Hadoop
+  - Hive
+#  - Mahout
+#  - Hue
+#  - Spark
+#  - Ganglia
+#  - Pig
+
+
+### CONFIGURATIONS
+# Configurations are basically settings for Applications in JSON format.
+# They are not uploaded to S3, but simply passed to boto3. They can be loaded
+# from a 'file' or 'dir', or they can be specified inline, in YAML
+configurations:
+  - file: 'emrer_config.jason'
+  - dir: 'emrer_configs'
+
+
+### BOOTSTRAP ACTIONS and STEPS
+# ... are basically scripts executed at different times in the life of 
+# a cluster. Bootstrap actions are executed first, then applicarions are
+# installed (Hadoop, Hive, etc.), then steps are executed. Bootstrap
+# actions and steps follow the same model:
+## An S3 BUCKET and a PREFIX can be defined for each of them outside the
+#  list of scripts to be exected. If defined, those will be inherited
+#  by each execution item. However, they can be also defined for each
+#  item, in which case the item-defined ones will have priority.
+## ITEMS to be executed can be defined as:
+#   - script: a (local) script. The script will be uploaded to S3,
+#       using the define bucket/prefix. The S3 path will be passed
+#       to the EMR cluster.
+#   - dir: a (local) directory containing scripts to be executed.
+#       acts as if a 'script' item was specified for each file in the 
+#       directory. If arguments are specified, these are passed on to
+#       each script in the directory. Arguments cannot be defined
+#       in-line. This should be considered a bug.
+#   - s3: an S3 object. The 's3://' prefix is optional.
+#   - command: a script that exists already on the EMR node. No attempt
+#       will be made to check that it's valid. The 'file://' prefix is
+#       optional.
+# Each item has a number of additional, optional, config keys:
+#   - args. Arguments can be passed to each item either inline:
+#       - script: path/to/script inline_arg1 inline_arg2
+#     or using the 'args' key:
+#       - script: path/to/script
+#         args:
+#           - key_arg3
+#           - key_arg4
+#     If both are present,  the 'args' part will be appended to the 
+#     inline part, resulting in:
+#       path/to/script inlline_arg1 inline_arg2 key_arg3 key_arg4
+#   - name. The name that will be shown in EMR Console for each script
+#     If not present it will be set to the script's name. Spaces 
+#     will be replaced with underscores in either case.
+#   - name_on_s3. The name the object will be given when uploaded to S3.
+#     Applies to 'script' and 'dir'. If it's set to one of '_script_', 
+#     '_scriptname_', '_file_', or '_filename_', the name of the file
+#     will be used. This is the default. The special value _random_
+#     will set upload a the script to S3 using a random string.
+#   - s3bucket and s3prefix. See the explanation about bucket inheritance
+# For STEPS ONLY, there are a few additional keys:
+#   - on_failure: Action to take if the step fails.
+#       Valid values are (case insensitive):
+#         - terminate | terminate_cluster | terminate_job_flow
+#         - cancel | wait | cancel_and_wait
+#         - continue
+#   - type. specifies what kind of step it is. It can be a custom jar 
+#     to be executed directly by Hadoop, or it can be a script that 
+#     will be passed to the appropriate application. Valid values 
+#     (at the end of 2015) are:
+#         - custom_jar | custom | jar
+#         - streaming | hadoop-streaming | hadoop_streaming
+#         - hive | hive-script | hive_script
+#         - pig
+#         - impala
+#         - spark
+#         - shell - shell scripts are run using script-runner.jar
+#     NOT ALL OF THEM ARE IMPLEMENTED
+###
+### BOOTSTRAP ACTIONS - executed in the order in which they are defined
+bootstrap_s3bucket: 'boostrap_actions_bucket'
+bootstrap_s3prefix: 'cluster/bootstrap_actions/'
+bootstrap_actions:
+  - script: local_script1.sh arg1 arg2
+    args:
+      - arg3
+      - arg4
+    name_on_s3: script1.sh
+    name: "first_action"
+  - dir: "directory_with_scrips"
+    s3bucket: 'a_different_bucket'
+    s3prefix: 'a/different/prefix'
+  - s3: 's3://prefix/will/be/added/if/it/doesnt/exist'
+  - command: 'aws --version'
+
+
+### STEPS - executed in the order they are defined
+steps_s3bucket: 'steps_bucket'
+steps_s3prefix: 'cluster/steps/'
+steps:
+  - name: 'Hive_CloudFront'
+    on_failure: terminate
+    type: hive
+    s3: eu-west-1.elasticmapreduce.samples/cloudfront/code/Hive_CloudFront.q
+    args:
+      - input: s3://eu-west-1.elasticmapreduce.samples
+      - output: s3://bucket/emr/output/
+  - name: 'script_step_touch'
+    type: shell
+    script: 'emr_launch_test_step_touch file'
+    name_on_s3: '_random_' 

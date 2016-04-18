@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+
+from __future__ import unicode_literals
+from __future__ import print_function
+
+import argparse
+from os import chdir
+from os import path
+from pprint import pprint
+from warnings import warn
+
+import boto3
+
+from awslib import get_emr_release_label, get_cluster_ids
+from emrer_to_boto3 import b3_tags, b3_bootstrap, b3_step, b3_config
+
+
+def main():
+    optparser = argparse.ArgumentParser(description="manipulate EMR clusters")
+    optparser.add_argument("action", type=str.lower, choices=['start', 'stop'],
+            help="action to take on the cluster")
+    optparser.add_argument("config", type=str,
+        help="cluster configuration file")
+    optparser.add_argument("-p", "--profile", help="aws credentials profile")
+    optparser.add_argument("-f", "--force", action='store_true',
+            help="terminate cluster without asking even if it's protected")
+    args = optparser.parse_args()
+
+    if args.action == 'start' and not path.isfile(args.config):
+        print('No such file: ' + args.config)
+        exit(1)
+
+    # Set working directory to where the config is. That way paths in config
+    # file will be interpreted as relative to the config directory
+    chdir(path.dirname(path.realpath(args.config)))
+    config_file = path.basename(args.config)
+
+    if args.action == 'start':
+        create_emr_cluster(config_file, args.profile)
+    elif args.action == 'stop':
+        stop_emr_cluster(config_file, profile=args.profile, force=args.force)
+
+
+def create_emr_cluster(config, profile):
+    session = boto3.session.Session(profile_name=profile)    
+    emr = session.client('emr')
+
+    cset = get_emr_cluster_settings(config)
+
+    # GENERAL CLUSTER SETTINGS
+    name = cset['name']
+    log_uri = cset['log_uri']
+    keep_job_flow_alive_when_no_steps = cset['keep_cluster_running']
+    termination_protected = cset['keep_cluster_running']
+    visible_to_all_users = cset['visible_to_all_users']
+    # TAGS - add cluster id to tags. should not exist in tags list
+    tags = []
+    if 'tags' in cset:
+        for tag in cset['tags']:
+            if 'emr_unique_name' in tag:
+                raise KeyError('Tag emr_unique_name should not be defined')
+        tags.extend(b3_tags(cset['tags']))
+    tags.insert(0, {'Key': 'emr_unique_name', 'Value': cset['unique_name']})
+    # check that no other cluster using the same emr_unique_name exists
+    unique_tag = {'emr_unique_name': cset['unique_name']}
+    if len(get_cluster_ids(session, state='on', tags_any=unique_tag)) > 0:
+        raise RuntimeError('A cluster named {} already exists.'.format(
+                cset['unique_name']))
+
+    # SOFTWARE AND STEPS
+    release_label = cset['release_label']
+    # bootstrap actions
+    bootstrap_actions = []
+    for bootstrap_action in cset['bootstrap_actions']:
+        bootstrap_actions.extend(
+            b3_bootstrap(bootstrap_action, 
+                cset['bootstrap_s3bucket'], cset['bootstrap_s3prefix'], session)
+            )
+    # applications
+    applications = []
+    for application in cset['applications']:
+        applications.append({ 'Name': application })
+    # configurations - skipping
+    configurations = []
+    for config in cset['configurations']:
+        configurations.extend(b3_config(config))
+
+    # convert steps to boto3 syntax
+    steps = []
+    for step in cset['steps']:
+        steps.extend(b3_step(step, 
+            cset['steps_s3bucket'], cset['steps_s3prefix'], session)
+            )
+
+    # SECURITY AND NETWORK SETTINGS
+    ec2_key_name = cset['ssh_key_name']
+    job_flow_role = cset['ec2_role']
+    service_role = cset['emr_role']
+    ec2_subnet_id = cset['subnet_id']
+    # first element in list of security groups will be the main one
+    emr_managed_master_security_group = cset['master_security_groups'][0]
+    emr_managed_slave_security_group = cset['slave_security_groups'][0]
+    additional_master_security_groups =  cset['master_security_groups'][1:]
+    additional_slave_security_groups =  cset['slave_security_groups'][1:]
+
+    # HARDWARE
+    # skipping configurations, I don't know how to use them at this point
+    #configurations = None
+    instance_groups = []
+    # define the master instance
+    if cset['master_instance_count'] < 1:
+        raise InvalidConfig('The cluster needs at least one master')
+
+    instance_group_master = {
+            'Name': cset['name'] + '-master',
+            'InstanceRole': 'MASTER',
+            'InstanceType': cset['master_instance_type'],
+            'InstanceCount': cset['master_instance_count']
+    }
+    instance_groups.append(instance_group_master)
+    # define core instances
+    if cset['core_instance_count'] > 0:
+        instance_group_core = {
+                'Name': cset['name'] + '-core',
+                'InstanceRole': 'CORE',
+                'InstanceType': cset['core_instance_type'],
+                'InstanceCount': cset['core_instance_count']
+        }
+        instance_groups.append(instance_group_core)
+    # define task instances group. there can be more than one of these, but an
+    # instance group must have at least one instance. so count can't be 0
+    if cset['task_instance_count'] > 0:
+        instance_group_task = {
+                'Name': cset['name'] + '-task',
+                'InstanceRole': 'TASK',
+                'InstanceType': cset['task_instance_type'],
+                'InstanceCount': cset['task_instance_count']
+        }
+        instance_groups.append(instance_group_task)
+    instances = {
+            'InstanceGroups': instance_groups,
+            'Ec2KeyName': ec2_key_name,
+            'KeepJobFlowAliveWhenNoSteps': keep_job_flow_alive_when_no_steps,
+            'TerminationProtected': termination_protected,
+            'Ec2SubnetId': ec2_subnet_id,
+            'EmrManagedMasterSecurityGroup': emr_managed_master_security_group,
+            'EmrManagedSlaveSecurityGroup': emr_managed_slave_security_group,
+            'AdditionalMasterSecurityGroups': additional_master_security_groups,
+            'AdditionalSlaveSecurityGroups': additional_slave_security_groups
+    }
+
+    # 'debug' output
+
+    pprint("STARTING CLUSTER WITH THESE SETTINGS:")
+    pprint({'Name': name})
+    pprint({'LogUri': log_uri})
+    pprint({'ReleaseLabel': release_label})
+    pprint({'Instances': instances})
+    pprint({'BootstrapActions': bootstrap_actions})
+    pprint({'Steps': steps})
+    pprint({'Applications': applications}) 
+    pprint({'Configurations': configurations}) 
+    pprint({'VisibleToAllUsers': visible_to_all_users})
+    pprint({'JobFlowRole': job_flow_role})
+    pprint({'ServiceRole': service_role})
+    pprint({'Tags': tags})
+
+
+    ## FINALLY!! run the cluster and watch it burn
+    cluster = emr.run_job_flow(
+        Name = name,
+        LogUri = log_uri,
+        ReleaseLabel = release_label,
+        Instances = instances,
+        BootstrapActions = bootstrap_actions,
+        Steps = steps,
+        Applications = applications, 
+        Configurations = configurations, 
+        VisibleToAllUsers = visible_to_all_users,
+        JobFlowRole = job_flow_role,
+        ServiceRole = service_role,
+        Tags = tags
+    )
+    
+    pprint('')
+    pprint(cluster)
+
+
+def stop_emr_cluster(cluster, profile, force=False):
+    """Stops an EMR cluster.
+
+    Args:
+        cluster (str):
+            can be a configuration file or a cluster id. It will try to guess
+            based on prameter format and if there is a file by that name
+    """
+    if not (cluster[:2] == 'j-' and len(cluster) >= 10 or
+            path.isfile(cluster)):
+        raise RuntimeError(cluster + ' is neither a file nor a cluster id')
+
+    session = boto3.session.Session(profile_name=profile)    
+    emr = session.client('emr')
+
+    cluster_id = None
+    if cluster[:2] == 'j-' and len(cluster) >= 10 and not path.isfile(cluster):
+        cluster_id = cluster
+    else:
+        unique_name = get_emr_cluster_settings(cluster)['unique_name']
+        # look for our cluster, get the id. error if more than one is found
+        cluster_ids = get_cluster_ids(session, state='on',
+                tags_any = { 'emr_unique_name':unique_name })
+        if len(cluster_ids) == 0:
+            warn('Cluster {} was not found running'.format(unique_name))
+            return True
+        elif len(cluster_ids) > 1:
+            raise RuntimeError(
+                '{} clusters with unique name {} were found running'.format(
+                    len(cluster_ids), unique_name))
+        else:
+            cluster_id = cluster_ids[0]
+
+    cluster_info = emr.describe_cluster(ClusterId=cluster_id)['Cluster']
+    cluster_state = cluster_info['Status']['State']
+    cluster_name = cluster_info['Name']
+    cluster_id = cluster_info['Id']
+    if cluster_state in ['TERMINATING','TERMINATED','TERMINATED_WITH_ERRORS']:
+        print('Cluster "{}" ({}) is already {}.'.format(
+            cluster_name, cluster_id, cluster_state.lower()))
+        return
+
+    if cluster_info['TerminationProtected'] and not force:
+        message = ('Cluster {} ({}) has termination protection enabled. '
+                'Are you sure that you want to stop it? ').format(
+                        cluster_name, cluster_id)
+        stop_cluster = input(message)
+        if stop_cluster.lower() in ['y', 'yes']:
+            force = True
+        else:
+            return
+
+    if force:
+        emr.set_termination_protection(JobFlowIds=[cluster_id],
+                TerminationProtected=False)
+
+    emr.terminate_job_flows(JobFlowIds=[cluster_id])
+
+
+def get_emr_cluster_settings(yaml_file=None):
+    """
+    Reads a yaml file passed in as a parameter, fills in company
+    defaults where appropriate, then returns a standard dictionary structure
+    that can be used further to run various operations on EMR clusters, like
+    launch the cluster, resize it, add steps to it, etc.
+    This is only set up for EMR 4.x
+
+    Args:
+        yaml_file (str): full path to the file containing cluster settings
+
+    Returns:
+        a dictionary containing cluster parameters. A value should be provided
+        for each setting, wether it's a default value or empty, unless it is a
+        required setting, in which case an exception will be raised if it is
+        missing from the file
+    """
+    from yaml import safe_load as yaml_safe_load
+
+    with open(yaml_file, 'r') as yaml_stream:
+        cset = yaml_safe_load(yaml_stream)
+
+    if isinstance(cset, list):
+        cset = cset[0]
+
+    # check for keys that we require, raise exception if not provided
+    required_keys = [
+            'unique_name', 'name', 
+            'subnet_id', 'master_security_groups', 'slave_security_groups',
+    ]
+    # TODO: some keys like subnet_id and *security_groups could be determined by
+    # a function, depending on something like cluster_type. An exception could
+    # be raised if the function can't find default values for that cluster
+    missing_keys = []
+    for key in required_keys:
+        if not key in cset:
+            missing_keys.append(key)
+    if len(missing_keys) != 0:
+        raise KeyError('Required settings not found in file: ', missing_keys)
+
+    # allow INSTANCE TYPES to be 'inherited', this way it's possible to define
+    # instance type only once, either as default or master
+    if 'default_instance_type' not in cset:
+        if 'instance_type' in cset:
+            default_instance_type = cset.pop('instance_type')
+        else:
+            default_instance_type = 'm1.large'
+    else:
+        default_instance_type = cset.pop('default_instance_type')
+    if 'master_instance_type' not in cset:
+        cset['master_instance_type'] = default_instance_type
+    if 'slave_instance_type' not in cset:
+        slave_instance_type = cset['master_instance_type']
+    else:
+        slave_instance_type = cset.pop('slave_instance_type')
+    if 'core_instance_type' not in cset:
+        cset['core_instance_type'] = slave_instance_type
+    if 'task_instance_type not' in cset:
+        cset['task_instance_type'] = cset['core_instance_type']
+
+    # we can allow MARKET (ON_DEMAND or SPOT) inheritence also, but until 
+    # we write a function to determine market type and acceptible price
+    # we'll just set it to ON_DEMAND in defaults
+
+    # BOOTSTRAP ACTIONS are going to be a list, similar to steps. Company
+    # required settings/configurations should be inserted at the start of the
+    # list. MAYBE THIS SHOULD BE IN THE LAUNCH PROCEDURE?
+
+
+    # make sure all keys have a defaut value, but only for EMR 4.x
+    default_values = {
+            #### GENERAL CLUSTER SETTINGS
+            #unique_name: required
+            #name: required
+            'log_uri': '',
+            'additional_info': '',
+            'keep_cluster_running': False,
+            'visible_to_all_users': True,
+            'tags': [],
+            #### SOFTWARE AND STEPS
+            'release_label': get_emr_release_label(),
+            'bootstrap_s3bucket': '',
+            'bootstrap_s3prefix': '',
+            'bootstrap_actions': [],
+            'applications': [],
+            'configurations': [],
+            'steps': [],
+            #### SECURITY AND NETWORK SETTINGS
+            'ssh_key_name': '', # no key means no ssh access
+            # wether the roles exist or not, that's a different matter
+            'ec2_role': 'EMR_EC2_DefaultRole',
+            'emr_role': 'EMR_DefaultRole',
+            #subnet_id: required
+            #master_security_groups: required
+            #slave_security_groups: required
+            'master_instance_count': 1,
+            'core_instance_count': 0,
+            'task_instance_count': 0,
+            'master_instance_type': 'm1.large',
+            'core_instance_type': 'm1.large',
+            'task_instance_type': 'm1.large',
+            'master_instance_market': 'ON_DEMAND',
+            'core_instance_market': 'ON_DEMAND',
+            'task_instance_market': 'ON_DEMAND'
+    }
+
+    for key in default_values:
+        cset.setdefault(key, default_values[key])
+
+    return cset
+
+###
+###    # For MARKET (ON_DEMAND or SPOT), we should have a function to determine
+###    # market type and acceptible price. Until then, it's not set (ON_DEMAND)
+###
+###    # TAGS - I assume 'Name' is already set?
+###    tags = []
+###
+
+if __name__ == "__main__":
+    # execute only if run as a script
+    main()
