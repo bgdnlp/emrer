@@ -36,7 +36,7 @@ def b3_tags(tags_in):
     for tag in tags_in:
         for tag_key in tag:
             tags_out.append({'Key': tag_key, 'Value': tag[tag_key]})
-    print(tags_out)
+
     return tags_out
 
 
