@@ -1,0 +1,6 @@
+{  
+   "Classification":"core-site",
+   "Properties":{  
+      "hadoop.security.groups.cache.secs":"250"
+   }
+}
