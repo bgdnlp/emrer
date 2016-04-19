@@ -13,7 +13,7 @@ set -e
 
 # make the script execute itself as root if we're another user (like 'hadoop')
 if [ `whoami` != root ]; then
-    sudo sh $0
+    sudo sh $0 "$@"
     exit $?
 fi
 

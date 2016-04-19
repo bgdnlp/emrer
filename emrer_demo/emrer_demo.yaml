@@ -177,21 +177,19 @@ bootstrap_s3prefix: 'bootstrap_actions/'
 bootstrap_actions:
   - command: >
         sudo sh -c "echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers"
+  - dir: 'os_setup'
+    # Bad example, but the argument defined here will be inherited by all
+    # scripts in the os_setup directory. Only one of them is actually using
+    # it though. It works, but it's really not good practice. This is
+    # just an example, shouldn't do that in the real world
+    args:
+      - 'bf-emrer-demo/ansible-2.0.1.0/'
   - name: 'cloudfront sample data setup'
     script: cloudfront_data_setup.sh
     args:
       - 'bf-emrer-demo'
     s3prefix: 'cloudfront/'
     name_on_s3: data_setup.sh
-#  - dir: 'os_setup'
-    # Bad example, but the argument defined here will be inherited by all
-    # scripts in the os_setup directory. Only one of them is actually using
-    # it though. It works, but it's really not good practice. This is
-    # just an example, shouldn't do that in the real world
-#  - script: 'os_setup/02_ansible_bootstrap.sh'
-#    args:
-#      - 'bf-emrer-demo'
-#  - command: 'aws --version'
 
 
 ### STEPS - executed in the order they are defined
