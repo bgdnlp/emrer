@@ -71,7 +71,7 @@ steps:
   - name: 'Hive_CloudFront'
     on_failure: terminate
     type: hive
-    s3: eu-west-1.elasticmapreduce.samples/cloudfront/code/Hive_CloudFront.q
+    s3: bf-emrer-demo/cloudfront/code/Hive_CloudFront.q
     args:
       - input: s3://bf-emrer-demo
       - output: s3://bf-emrer-demo/output/
