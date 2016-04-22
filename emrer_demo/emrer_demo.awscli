@@ -1,0 +1,127 @@
+# This is the same cluster as the one configured in the emrer_demo.yaml
+# file. This file is what it would take to start it from the command line.
+# It won't work as-is (missing line continuation characters, it's all
+# on one line), the purpose is to show the difference between a 'config'
+# done without emrer and one done with it
+
+aws emr create-cluster
+--name 'emrer_example_cluster'
+--tags 
+    'emr_unique_name=emrer_demo' 
+    'App=emrer' 
+    'Owner=bgdnlp' 
+--release-label emr-4.3.0
+--log-uri 's3n://bf-emrer-demo/logs/'
+--auto-terminate
+--ec2-attributes
+    {
+       "KeyName":"bgdnlp@",
+       "InstanceProfile":"EMR_EC2_DefaultRole",
+       "SubnetId":"subnet-3ee34c49",
+       "EmrManagedSlaveSecurityGroup":"sg-8c2da9e9",
+       "EmrManagedMasterSecurityGroup":"sg-8d2da9e8"
+    }
+--instance-groups '[
+       {
+          "InstanceCount":1,
+          "InstanceGroupType":"MASTER",
+          "InstanceType":"m1.medium",
+          "Name":"emrer_example_cluster-master"
+       },
+       {
+          "InstanceCount":2,
+          "InstanceGroupType":"CORE",
+          "InstanceType":"m1.large",
+          "Name":"emrer_example_cluster-core"
+       }
+    ]'
+--service-role EMR_DefaultRole
+--applications
+    Name=Hadoop
+    Name=Hive
+--configurations '[
+       {
+          "Classification":"core-site",
+          "Properties":{
+             "hadoop.security.groups.cache.secs":"250"
+          },
+          "Configurations":[
+    
+          ]
+       },
+       {
+          "Classification":"hadoop-log4j",
+          "Properties":{
+             "hadoop.root.logger":"WARN,console",
+             "mapred.audit.logger":"WARN,NullAppender",
+             "hdfs.audit.logger":"WARN,NullAppender",
+             "log4j.logger.emr":"WARN"
+          },
+          "Configurations":[
+    
+          ]
+       }
+    ]'
+--bootstrap-actions '[
+       {
+          "Path":"file://sudo",
+          "Args":[
+             "sh",
+             "-c",
+             "echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers"
+          ],
+          "Name":"sudo"
+       },
+       {
+          "Path":"s3://bf-emrer-demo/bootstrap_actions/01_ansible_user.sh",
+          "Args":[
+             "bf-emrer-demo/ansible-2.0.1.0/"
+          ],
+          "Name":"os_setup/01_ansible_user.sh"
+       },
+       {
+          "Path":"s3://bf-emrer-demo/bootstrap_actions/02_ansible_bootstrap.sh",
+          "Args":[
+             "bf-emrer-demo/ansible-2.0.1.0/"
+          ],
+          "Name":"os_setup/02_ansible_bootstrap.sh"
+       },
+       {
+          "Path":"s3://bf-emrer-demo/cloudfront/data_setup.sh",
+          "Args":[
+             "bf-emrer-demo"
+          ],
+          "Name":"cloudfront sample data setup"
+       }
+    ]'
+--steps '[
+       {
+          "Args":[
+             "s3://bf-emrer-demo/steps/XZRNNYKOWHYL",
+             "/tmp/file"
+          ],
+          "Type":"CUSTOM_JAR",
+          "ActionOnFailure":"TERMINATE_CLUSTER",
+          "Jar":"s3://elasticmapreduce/libs/script-runner/script-runner.jar",
+          "Properties":"",
+          "Name":"script_step_touch"
+       },
+       {
+          "Args":[
+             "hive-script",
+             "--run-hive-script",
+             "--args",
+             "-f",
+             "s3://bf-emrer-demo/cloudfront/code/Hive_CloudFront.q",
+             "-d",
+             "INPUT=s3://bf-emrer-demo",
+             "-d",
+             "OUTPUT=s3://bf-emrer-demo/output/"
+          ],
+          "Type":"CUSTOM_JAR",
+          "ActionOnFailure":"TERMINATE_CLUSTER",
+          "Jar":"command-runner.jar",
+          "Properties":"",
+          "Name":"Hive_CloudFront"
+       }
+    ]'
