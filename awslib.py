@@ -32,6 +32,26 @@ def upload_to_s3_rand(session, file_to_upload, s3bucket,
     return '{}/{}'.format(s3bucket, s3key)
 
 
+def get_amazon_linux_ami(latest=True):
+    """
+    A dummy function for now, when developped it should return one and only
+    one id of an Amazon Linux AMI to be used. Arguments can be passed on to
+    to identify the exact image. 'latest' should return the newest version
+    of Amazon Linux, HVM, EBS-Backed, 64-bit (the most used image),
+    depending on region.
+
+    Check this page on how to find the Linux AMI:
+    http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/finding-an-ami.html
+
+    Here's how to filter images from the command line:
+    aws --profile bf_edcdev_luputb ec2 describe-images --owners self amazon \
+            --filters "Name=root-device-type,Values=ebs" \
+                "Name=virtualization-type,Values=hvm" \
+                "Name=architecture,Values=x86_64"
+    """
+    return 'ami-0eac257d'
+
+
 def get_emr_release_label():
     """
     dummy function
