@@ -8,6 +8,7 @@ from os import chdir
 from os import path
 from pprint import pprint
 from warnings import warn
+from yaml import safe_load as yaml_safe_load
 
 import boto3
 
@@ -247,10 +248,10 @@ def stop_emr_cluster(cluster, profile, force=False):
 
 def get_emr_cluster_settings(yaml_file=None):
     """
-    Reads a yaml file passed in as a parameter, fills in company
-    defaults where appropriate, then returns a standard dictionary structure
-    that can be used further to run various operations on EMR clusters, like
-    launch the cluster, resize it, add steps to it, etc.
+    Reads a yaml file passed in as a parameter, fills in defaults
+    where appropriate, then returns a standard dictionary structure
+    that can be used further to run various operations on EMR clusters,
+    like launch the cluster, resize it, add steps to it, etc.
     This is only set up for EMR 4.x
 
     Args:
@@ -262,8 +263,6 @@ def get_emr_cluster_settings(yaml_file=None):
         required setting, in which case an exception will be raised if it is
         missing from the file
     """
-    from yaml import safe_load as yaml_safe_load
-
     with open(yaml_file, 'r') as yaml_stream:
         cset = yaml_safe_load(yaml_stream)
 
@@ -315,7 +314,7 @@ def get_emr_cluster_settings(yaml_file=None):
 
 
     # make sure all keys have a defaut value, but only for EMR 4.x
-    default_values = {
+    default_config = {
             #### GENERAL CLUSTER SETTINGS
             #unique_name: required
             #name: required
@@ -351,8 +350,8 @@ def get_emr_cluster_settings(yaml_file=None):
             'task_instance_market': 'ON_DEMAND'
     }
 
-    for key in default_values:
-        cset.setdefault(key, default_values[key])
+    for key in default_config:
+        cset.setdefault(key, default_config[key])
 
     return cset
 
