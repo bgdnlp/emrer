@@ -1,5 +1,9 @@
 ---
-# Will be set as a tag, used later to identify the cluster to be stopped
+# Will be set as a tag, used later to identify the cluster.
+# If a cluster with this ID exists, the script will quit with
+# a message if asked to start another one.
+# It is also used to identify the cluster that needs to be
+# terminated, when the 'stop' command was issued.
 # Default: REQUIRED
 unique_name: 'unique_id_of_cluster_for_later_use'
 
@@ -17,11 +21,12 @@ release_label: 'emr-4.3.0'
 # Default: ''
 log_uri: 's3://logs_bucket/logs_path/'
 
-# Weather to stop the cluster or not after steps have been completed
+# Whether to stop the cluster or not after steps have been completed
 # Default: False
 keep_cluster_running: False
 
 # Name of the ssh key that will be added to hadoop's ~/.ssh/authorized_keys.
+# A key by this name must exist in AWS EC2.
 # If no key is specified, it won't be possible to ssh to hadoop user. Which
 # may be fine, for example for clusters that will autodestroy
 # Default: ''
@@ -101,7 +106,7 @@ configurations:
 
 ### BOOTSTRAP ACTIONS and STEPS
 # ... are basically scripts executed at different times in the life of 
-# a cluster. Bootstrap actions are executed first, then applicarions are
+# a cluster. Bootstrap actions are executed first, then applications are
 # installed (Hadoop, Hive, etc.), then steps are executed. Bootstrap
 # actions and steps follow the same model:
 ## An S3 BUCKET and a PREFIX can be defined for each of them outside the
@@ -110,13 +115,13 @@ configurations:
 #  item, in which case the item-defined ones will have priority.
 ## ITEMS to be executed can be defined as:
 #   - script: a (local) script. The script will be uploaded to S3,
-#       using the define bucket/prefix. The S3 path will be passed
+#       to the defined bucket/prefix. The S3 path will be passed
 #       to the EMR cluster.
 #   - dir: a (local) directory containing scripts to be executed.
 #       acts as if a 'script' item was specified for each file in the 
-#       directory. If arguments are specified, these are passed on to
+#       directory. If arguments are given, these are passed on to
 #       each script in the directory. Arguments cannot be defined
-#       in-line. This should be considered a bug.
+#       in-line. This is considered a bug in emrer.
 #   - s3: an S3 object. The 's3://' prefix is optional.
 #   - command: a script that exists already on the EMR node. No attempt
 #       will be made to check that it's valid. The 'file://' prefix is
